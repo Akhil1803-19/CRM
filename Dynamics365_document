@@ -1,0 +1,172 @@
+Step-by-Step Guide: CI/CD for Dynamics 365 using GitHub Actions (Pattern A)
+1. Overview
+Pattern A uses the DEV environment as the source of truth. The CI pipeline exports unmanaged solutions from DEV, unpacks them into Git, and runs Solution Checker. The Build pipeline exports managed solutions from DEV and stores them as artifacts. The CD pipeline imports managed solutions into TEST and PROD environments using deployment settings files for connection references and environment variables.
+2. Prerequisites
+1.	1. Create three Dataverse environments: DEV, TEST, PROD (each with a database). (Done)
+2.	2. Create an Azure AD App Registration (service principal) and generate a client secret. (Done)
+3.	3. Grant Dynamics CRM API permissions and create an Application User in each environment with System Administrator role. (Done)
+4.	4. Prepare GitHub repository and add secrets: PP_APP_ID, PP_TENANT_ID, PP_CLIENT_SECRET, DEV_ENV_URL, TEST_ENV_URL, PROD_ENV_URL.
+3. Tool Installation
+5.	1. Power Platform CLI (PAC) for local testing: pac install latest
+6.	2. Node.js (for PCF controls, optional for Pattern A)
+7.	3. .NET SDK (for plug-in assemblies, optional for Pattern A)
+4. GitHub Setup
+Create a GitHub repository and configure Actions secrets:
+- PP_APP_ID
+- PP_TENANT_ID
+- PP_CLIENT_SECRET
+- DEV_ENV_URL
+- TEST_ENV_URL
+- PROD_ENV_URL
+5. Deployment Settings
+Create JSON files for TEST and PROD environments under pipelines/settings/ directory. These files map environment variables and connection references.
+Example deploy.test.json:
+{
+  "EnvironmentVariables": [
+    { "SchemaName": "new_BackendApiBaseUrl", "Value": "https://test.api.contoso.local" },
+    { "SchemaName": "new_NotificationToEmail", "Value": "crm-test@contoso.com" }
+  ],
+  "ConnectionReferences": [
+    {
+      "LogicalName": "new_sharedsharepointonline",
+      "ConnectionId": "c1b6d99e-0f9a-4b9f-9be1-1b715a1e8a11",
+      "ConnectorId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline"
+    }
+  ]
+}
+6. CI Workflow
+Purpose: Export unmanaged solution from DEV, unpack, run Solution Checker, and commit changes.
+name: CI – Export & Unpack from DEV
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ main ]
+jobs:
+  export_unpack_check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Power Platform Tools
+        uses: microsoft/powerplatform-actions/actions-install@v1
+      - name: WhoAmI
+        uses: microsoft/powerplatform-actions/who-am-i@v1
+        with:
+          environment-url: ${{ secrets.DEV_ENV_URL }}
+          app-id: ${{ secrets.PP_APP_ID }}
+          client-secret: ${{ secrets.PP_CLIENT_SECRET }}
+          tenant-id: ${{ secrets.PP_TENANT_ID }}
+      - name: Export unmanaged solution
+        uses: microsoft/powerplatform-actions/export-solution@v1
+        with:
+          environment-url: ${{ secrets.DEV_ENV_URL }}
+          app-id: ${{ secrets.PP_APP_ID }}
+          client-secret: ${{ secrets.PP_CLIENT_SECRET }}
+          tenant-id: ${{ secrets.PP_TENANT_ID }}
+          solution-name: YourSolutionName
+          managed: false
+          solution-output-file: out/YourSolutionName_unmanaged.zip
+      - name: Unpack solution
+        uses: microsoft/powerplatform-actions/unpack-solution@v1
+        with:
+          solution-file: out/YourSolutionName_unmanaged.zip
+          solution-folder: solutions/YourSolutionName
+          overwrite-files: true
+      - name: Run Solution Checker
+        uses: microsoft/powerplatform-actions/check-solution@v1
+        with:
+          environment-url: ${{ secrets.DEV_ENV_URL }}
+          app-id: ${{ secrets.PP_APP_ID }}
+          client-secret: ${{ secrets.PP_CLIENT_SECRET }}
+          tenant-id: ${{ secrets.PP_TENANT_ID }}
+          solution-file: out/YourSolutionName_unmanaged.zip
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add solutions/YourSolutionName
+          git commit -m "Unpacked solution from DEV" || echo "No changes"
+          git push
+
+7. Build Workflow
+Purpose: Export managed solution from DEV and upload as artifact.
+name: Build – Managed Solution
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'solutions/YourSolutionName/**'
+jobs:
+  build_managed:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Power Platform Tools
+        uses: microsoft/powerplatform-actions/actions-install@v1
+      - name: Export managed solution
+        uses: microsoft/powerplatform-actions/export-solution@v1
+        with:
+          environment-url: ${{ secrets.DEV_ENV_URL }}
+          app-id: ${{ secrets.PP_APP_ID }}
+          client-secret: ${{ secrets.PP_CLIENT_SECRET }}
+          tenant-id: ${{ secrets.PP_TENANT_ID }}
+          solution-name: YourSolutionName
+          managed: true
+          solution-output-file: drop/YourSolutionName_managed.zip
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: managed-solution
+          path: drop/YourSolutionName_managed.zip
+
+8. CD Workflow
+Purpose: Import managed solution into TEST or PROD using deployment settings file.
+name: Deploy – TEST & PROD
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options: [ TEST, PROD ]
+      artifactName:
+        description: 'Artifact name'
+        required: true
+        default: 'managed-solution'
+jobs:
+  deploy:
+    runs-on: windows-latest
+    environment: ${{ github.event.inputs.environment == 'PROD' && 'prod' || 'test' }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ github.event.inputs.artifactName }}
+      - name: Install Power Platform Tools
+        uses: microsoft/powerplatform-actions/actions-install@v1
+      - name: Import managed solution
+        uses: microsoft/powerplatform-actions/import-solution@v1
+        with:
+          environment-url: ${{ github.event.inputs.environment == 'PROD' && secrets.PROD_ENV_URL || secrets.TEST_ENV_URL }}
+          app-id: ${{ secrets.PP_APP_ID }}
+          client-secret: ${{ secrets.PP_CLIENT_SECRET }}
+          tenant-id: ${{ secrets.PP_TENANT_ID }}
+          solution-file: YourSolutionName_managed.zip
+          publish-changes: true
+          activate-plugins: true
+          use-deployment-settings-file: true
+          deployment-settings-file: ${{ github.event.inputs.environment == 'PROD' && 'pipelines/settings/deploy.prod.json' || 'pipelines/settings/deploy.test.json' }}
+
+9. Verification
+8.	1. Check GitHub Actions logs for successful execution of each step.
+9.	2. Verify solution imported in TEST and PROD environments.
+10.	3. Ensure flows are active and plug-in steps are enabled.
+11.	4. Validate PCF controls render correctly in apps.
+10. Troubleshooting
+12.	1. Ensure actions-install@v1 is the first step in each workflow.
+13.	2. Verify GitHub secrets and Application User permissions.
+14.	3. Check deployment settings file for correct connection references and environment variables.
+15.	4. Set force-overwrite to true only if you intend to overwrite unmanaged customizations.
+11. References
+- Microsoft Learn – GitHub Actions for Power Platform
+- Official Power Platform GitHub Actions repository
