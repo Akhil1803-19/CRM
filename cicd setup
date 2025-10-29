@@ -1,1 +1,49 @@
+Dear Ashutosh,
+ 
+As discussed, we are aligned with the Pattern A approach for setting up the Dynamics CRM CI/CD pipeline using GitHub Actions, and we will further discuss the detailed pipeline setup plan and solution types in the upcoming sessions.We request your support in initiating discussions with the ADIB DevOps team to set up this pipeline. Additionally, we require the CommonMaster environment to host the base entity layer and the CRMSTAGE environment to consolidate all module solutions in one place.
+ 
+Please find below the environment lifecycle for all modules.
+ 
+ 
+ 
+ 
+1. CommonMaster (Base Solution Layer)
+•	Contains shared / common components that all squads use
+•	Acts as the foundation solution for CRMDEV1, CRMDEV2, and CRMDEV3 environments
+•	Ensures all teams are building on a consistent base
+ 
+2. Development Environments (Individual Squad Workspaces)
+•	Each squad works independently on their features in their own dev org.
+•	Solutions are unmanaged, allowing developers to freely customize and extend components.
+•	All squads rely on CommonMaster as the common base solution.
+ 
+3. CRMSTAGE (Staging Environment)
+    All solutions from all three dev environments will be imported into CRMSTAGE every day.
+•	Consolidation of changes from all squads
+•	Early integration conflict detection
+•	Ensures components from different squads work together
+ 
+4. CRMSIT01 (SIT)
+•	Used for full combined SIT testing
+•	Only Managed solutions are deployed here (no direct editing allowed)
+•	Ensures testing is done on a controlled, stable version of the system
+ 
+5. CRMUAT01 (UAT)
+•	End users and business stakeholders conduct UAT
+•	Any issues found are fixed back in CRMDEV environments, not here
+•	Represents pre-production state
+ 
+6. CRMTraining (Training Copy of UAT)
+•	A clone of UAT
+•	Used for user training, demo sessions, or practice without affecting UAT progress
+ 
+7. ADIBCRM (Production Environment)
+•	Live environment used by end users
+•	Only release-approved managed solutions are deployed here
+ 
+8. CRMDM (HotFix)
+•	Safe environment to check production data without impacting actual production
+•	Developers apply quick fixes here in Unmanaged form.
+•	Once validated → Export as Managed → Push to Pre-Prod → Prod.
+
 
